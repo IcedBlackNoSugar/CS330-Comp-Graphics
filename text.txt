@@ -1,0 +1,551 @@
+#include <iostream>         // cout, cerr
+#include <cstdlib>          // EXIT_FAILURE
+#include <GL/glew.h>        // GLEW library
+#include <GLFW/glfw3.h>     // GLFW library
+#include <cmath>
+// GLM Math Header inclusions
+#include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+/*Shader program Macro*/
+#ifndef GLSL
+#define GLSL(Version, Source) "#version " #Version " core \n" #Source
+#endif
+#include <vector>
+
+namespace {
+    const int WINDOW_WIDTH = 800;
+    const int WINDOW_HEIGHT = 600;
+
+    const int steps = 10;
+    const float angle = 3.1415926 * 2.f / steps;
+    float xPos = 0; float yPos = 0; float radius = 1.0f;
+
+
+    struct each_pole {
+        GLfloat x, z, y_start, y_end;
+    }; // struct
+
+    std::vector<each_pole> each_pole_vector; // vector of structs
+
+    struct GLMesh
+    {
+        GLuint vao;         // Handle for the vertex array object
+        GLuint vbos[4];     // Handles for the vertex buffer objects
+        GLuint nVertices;    // Number of indices of the mesh
+    };
+
+    //Main GLFW window
+    GLFWwindow* gWindow = nullptr;
+    // Triangle mesh data
+    GLMesh gMesh;
+    // Shader program
+    GLuint gProgramId;
+}
+
+//User-defined function prototypes
+bool UInitialize(int, char* [], GLFWwindow** window);
+void UResizeWindow(GLFWwindow* window, int width, int height);
+void UProcessInput(GLFWwindow* window);
+void URender();
+bool UCreateShaderProgram(const char* vtxShaderSource, const char* fragShaderSource, GLuint& programId);
+void UDestroyShaderProgram(GLuint programId);
+void UCreateTriangle(GLMesh& mesh);
+void UDestroyMesh(GLMesh& mesh);
+void UCreateTriangleTwo(GLMesh& mesh);
+
+/* Vertex Shader Source Code*/
+const GLchar* vertexShaderSource = GLSL(440,
+    layout(location = 0) in vec3 position; // Vertex data from Vertex Attrib Pointer 0
+layout(location = 1) in vec4 color;  // Color data from Vertex Attrib Pointer 1
+
+out vec4 vertexColor; // variable to transfer color data to the fragment shader
+
+uniform mat4 shaderTransform; // 4x4 matrix variable for transforming vertex data
+// Global Variables for transform matricies
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+
+void main()
+{
+    gl_Position = projection * view * model * vec4(position, 1.0f); // transforms vertex data using matrix
+    vertexColor = color; // references incoming color data
+}
+);
+
+
+/* Fragment Shader Source Code*/
+const GLchar* fragmentShaderSource = GLSL(440,
+    in vec4 vertexColor; // Variable to hold incoming color data from vertex shader
+
+out vec4 fragmentColor;
+
+void main()
+{
+    fragmentColor = vec4(vertexColor);
+}
+);
+int main(int argc, char* argv[]) {
+
+
+    if (!UInitialize(argc, argv, &gWindow))
+        return EXIT_FAILURE;
+    std::cout << "Initialized" << std::endl;
+
+
+    UCreateTriangle(gMesh);
+    std::cout << "Triangle Mesh Created" << std::endl;
+
+
+    UCreateTriangleTwo(gMesh);
+    std::cout << "Triangle Mesh 2 Created" << std::endl;
+
+    // Create the shader program
+    if (!UCreateShaderProgram(vertexShaderSource, fragmentShaderSource, gProgramId))
+        return EXIT_FAILURE;
+
+    //Set background to black
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+
+    while (!glfwWindowShouldClose(gWindow))
+    {
+
+        UProcessInput(gWindow);
+
+        URender();
+
+
+        glfwPollEvents();
+    }
+
+    UDestroyMesh(gMesh);
+
+    UDestroyShaderProgram(gProgramId);
+
+    exit(EXIT_SUCCESS);
+
+}
+
+bool UInitialize(int argc, char* argv[], GLFWwindow** window) {
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 4);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+
+
+
+
+    *window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "LearnOpenGL", NULL, NULL);
+    if (window == NULL) {
+        std::cout << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return false;
+    }
+
+    glfwMakeContextCurrent(*window);
+    glfwSetFramebufferSizeCallback(*window, UResizeWindow);
+
+    // GLEW: initialize
+    // ----------------
+    // Note: if using GLEW version 1.13 or earlier
+    glewExperimental = GL_TRUE;
+    GLenum GlewInitResult = glewInit();
+
+    if (GLEW_OK != GlewInitResult)
+    {
+        std::cerr << glewGetErrorString(GlewInitResult) << std::endl;
+        return false;
+    }
+
+
+    // Displays GPU OpenGL version
+    std::cout << "INFO: OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+
+
+
+
+    return true;
+}
+
+void UResizeWindow(GLFWwindow* window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+}
+
+void UProcessInput(GLFWwindow* window)
+{
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+}
+
+void URender() {
+
+    // Enable Z-depth.
+    glEnable(GL_DEPTH_TEST);
+
+
+    // Clear the frame and Z buffers.
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+
+    // 1. Scales the shape by 2
+    glm::mat4 scale = glm::scale(glm::vec3(2.0f, 2.0f, 2.0f));
+
+    // 2. Rotates shape by 45 degrees on the x, y and z axis
+    glm::mat4 rotation = glm::rotate(-45.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+
+    // 3. Places object at the origin
+    glm::mat4 translation = glm::translate(glm::vec3(0.0f, 0.0f, 0.0f));
+
+    // Transformations are applied right-to-left order
+    glm::mat4 model = translation * rotation * scale;
+
+    //Translates the camera
+    glm::mat4 view = glm::translate(glm::vec3(0.0f, 0.0f, -5.0f));
+
+    //Creates a Projection Matrix
+    glm::mat4 projection = glm::perspective(45.0f, (GLfloat)WINDOW_WIDTH / (GLfloat)WINDOW_HEIGHT, 0.1f, 100.0f);
+
+
+    //Set the shader to be used
+    glUseProgram(gProgramId);
+
+    // Retrieves and passes transform matrices to the shader program
+    GLint modelLoc = glGetUniformLocation(gProgramId, "model");
+    GLint viewLoc = glGetUniformLocation(gProgramId, "view");
+    GLint projLoc = glGetUniformLocation(gProgramId, "projection");
+
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+    //activate the VBOs contained within the mesh's VAO
+    glBindVertexArray(gMesh.vao);
+
+    // Draws the triangle
+    glDrawElements(GL_TRIANGLES, gMesh.nVertices, GL_UNSIGNED_SHORT, NULL); // Draws the triangle
+
+
+    // 1. Scales the shape by 2
+    glm::mat4 scale2 = glm::scale(glm::vec3(2.0f, 2.0f, 2.0f));
+
+    // 2. Rotates shape by 45 degrees on the x, y and z axis
+    glm::mat4 rotation2 = glm::rotate(-45.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+
+    // 3. Places object at the origin
+    glm::mat4 translation2 = glm::translate(glm::vec3(1.0f, 0.0f, 1.0f));
+
+    // Transformations are applied right-to-left order
+    glm::mat4 model2 = translation2 * rotation2 * scale2;
+
+
+    //Creates a Projection Matrix
+    glm::mat4 projection2 = glm::perspective(45.0f, (GLfloat)WINDOW_WIDTH / (GLfloat)WINDOW_HEIGHT, 0.1f, 100.0f);
+
+
+    //Set the shader to be used
+    glUseProgram(gProgramId);
+
+    // Retrieves and passes transform matrices to the shader program
+    GLint modelLoc2 = glGetUniformLocation(gProgramId, "model");
+    GLint viewLoc2 = glGetUniformLocation(gProgramId, "view");
+    GLint projLoc2 = glGetUniformLocation(gProgramId, "projection");
+
+    glUniformMatrix4fv(modelLoc2, 1, GL_FALSE, glm::value_ptr(model2));
+    glUniformMatrix4fv(viewLoc2, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(projLoc2, 1, GL_FALSE, glm::value_ptr(projection2));
+
+    //activate the VBOs contained within the mesh's VAO
+    glBindVertexArray(gMesh.vao);
+
+    // Draws the triangle
+    glDrawElements(GL_TRIANGLES, gMesh.nVertices, GL_UNSIGNED_SHORT, NULL); // Draws the triangle
+
+    glBindVertexArray(0);
+
+    glfwSwapBuffers(gWindow);
+
+}
+
+
+
+
+void UCreateTriangle(GLMesh& mesh) {
+
+    // Specifies normalized device coordinates (x,y,z) and color for Triangle vertices
+    GLfloat triangleOneVerts[] =
+    {
+        // Vertex Positions    // Colors (r,g,b,a)
+    -0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f, 1.0f, // Front Bottom left vertex 0
+     0.5f,  -0.5f, -0.5f,   1.0f, 1.0f, 0.0f, 1.0f, // Front Bottom Right vertex 1
+     0.0f, 0.5f, 0.0f,   0.0f, 1.0f, 0.0f, 1.0f, // Top point 2
+
+     -0.5f, -0.5f, 0.5f,   0.0f, 1.0f, 1.0f, 1.0f, // Back Bottom left vertex 3
+     0.5f,  -0.5f, 0.5f,   1.0f, 0.0f, 1.0f, 1.0f, // Back Bottom Right vertex 4
+
+
+
+    };
+
+    const GLuint floatsPerVertex = 3;
+    const GLuint floatsPerColor = 4;
+
+    GLushort triangleOneIndices[] = {
+
+        //Triangle 1
+        0,1,2,
+        //Triangle 2
+        1,4,2,
+        //Triangle 3
+        4,3,2,
+        //Triangle 4
+        3,2,0,
+        //Triangle 5
+        0,1,4,
+        //Triangle 6
+        4,3,0
+
+
+    };
+
+    // Specifies normalized device coordinates (x,y,z) and color for Triangle vertices
+    GLfloat triangleTwoVerts[] =
+    {
+        // Vertex Positions    // Colors (r,g,b,a)
+     -0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f, 1.0f, // Front Bottom left vertex 0
+      0.5f,  -0.5f, -0.5f,   1.0f, 1.0f, 0.0f, 1.0f, // Front Bottom Right vertex 1
+      0.0f, 0.5f, 0.0f,   0.0f, 1.0f, 0.0f, 1.0f, // Top point 2
+
+      -0.5f, -0.5f, 0.5f,   0.0f, 1.0f, 1.0f, 1.0f, // Back Bottom left vertex 3
+      0.5f,  -0.5f, 0.5f,   1.0f, 0.0f, 1.0f, 1.0f, // Back Bottom Right vertex 4
+
+
+
+    };
+
+    const GLuint floatsPerVertexTriTwo = 3;
+    const GLuint floatsPerColorTriTwo = 4;
+
+    GLushort triangleTwoIndices[] = {
+
+        //Triangle 1
+        0,1,2,
+        //Triangle 2
+        1,4,2,
+        //Triangle 3
+        4,3,2,
+        //Triangle 4
+        3,2,0,
+        //Triangle 5
+        0,1,4,
+        //Triangle 6
+        4,3,0
+
+
+    };
+
+    //Triangle 1
+
+    glGenVertexArrays(1, &mesh.vao);
+    glBindVertexArray(mesh.vao);
+
+
+    glGenBuffers(2, mesh.vbos);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbos[0]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(triangleOneVerts), triangleOneVerts, GL_STATIC_DRAW);
+
+    //Data for the indices
+    mesh.nVertices = sizeof(triangleOneIndices) / sizeof(triangleOneIndices[0]);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.vbos[1]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangleOneIndices), triangleOneIndices, GL_STATIC_DRAW);
+
+
+
+    //Triangle 2
+
+    glGenVertexArrays(3, &mesh.vao);
+    glBindVertexArray(mesh.vao);
+
+
+    glGenBuffers(4, mesh.vbos);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbos[2]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(triangleTwoVerts), triangleTwoVerts, GL_STATIC_DRAW);
+
+    //Data for the indices
+    mesh.nVertices = sizeof(triangleTwoIndices) / sizeof(triangleTwoIndices[0]);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.vbos[3]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangleTwoIndices), triangleTwoIndices, GL_STATIC_DRAW);
+
+
+
+    //Strides between vertex coordinates is 7
+    GLint stride = sizeof(float) * (floatsPerVertex + floatsPerColor);
+    GLint stride2 = sizeof(float) * (floatsPerVertexTriTwo + floatsPerColorTriTwo);
+
+
+    glVertexAttribPointer(0, floatsPerVertex, GL_FLOAT, GL_FALSE, stride, 0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, floatsPerColor, GL_FLOAT, GL_FALSE, stride, (char*)(sizeof(float) * floatsPerVertex));
+    glEnableVertexAttribArray(1);
+
+    glVertexAttribPointer(2, floatsPerVertexTriTwo, GL_FLOAT, GL_FALSE, stride2, 0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(3, floatsPerColorTriTwo, GL_FLOAT, GL_FALSE, stride2, (char*)(sizeof(float) * floatsPerVertexTriTwo));
+    glEnableVertexAttribArray(1);
+
+}
+
+void UCreateTriangleTwo(GLMesh& mesh) {
+
+    // Specifies normalized device coordinates (x,y,z) and color for Triangle vertices
+    GLfloat triangleTwoVerts[] =
+    {
+        // Vertex Positions    // Colors (r,g,b,a)
+    -0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f, 1.0f, // Front Bottom left vertex 0
+     0.5f,  -0.5f, -0.5f,   1.0f, 1.0f, 0.0f, 1.0f, // Front Bottom Right vertex 1
+     0.0f, 0.5f, 0.0f,   0.0f, 0.4f, 1.0f, 1.0f, // Top point 2
+
+     -0.5f, -0.5f, 0.5f,   1.0f, 0.7f, 1.0f, 1.0f, // Back Bottom left vertex 3
+     0.5f,  -0.5f, 0.5f,   1.0f, 1.0f, 1.0f, 1.0f, // Back Bottom Right vertex 4
+
+
+
+    };
+
+    const GLuint floatsPerVertexTriTwo = 3;
+    const GLuint floatsPerColorTriTwo = 4;
+
+    GLushort triangleTwoIndices[] = {
+
+        //Triangle 1
+        0,1,2,
+        //Triangle 2
+        1,4,2,
+        //Triangle 3
+        4,3,2,
+        //Triangle 4
+        3,2,0,
+        //Triangle 5
+        0,1,4,
+        //Triangle 6
+        4,3,0
+
+
+    };
+
+    //Triangle 2
+
+    glGenVertexArrays(3, &mesh.vao);
+    glBindVertexArray(mesh.vao);
+
+
+    glGenBuffers(4, mesh.vbos);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbos[2]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(triangleTwoVerts), triangleTwoVerts, GL_STATIC_DRAW);
+
+    //Data for the indices
+    mesh.nVertices = sizeof(triangleTwoIndices) / sizeof(triangleTwoIndices[0]);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.vbos[3]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangleTwoIndices), triangleTwoIndices, GL_STATIC_DRAW);
+
+
+
+    //Strides between vertex coordinates is 7
+    GLint stride = sizeof(float) * (floatsPerVertexTriTwo + floatsPerColorTriTwo);
+
+    glVertexAttribPointer(0, floatsPerVertexTriTwo, GL_FLOAT, GL_FALSE, stride, 0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, floatsPerColorTriTwo, GL_FLOAT, GL_FALSE, stride, (char*)(sizeof(float) * floatsPerVertexTriTwo));
+    glEnableVertexAttribArray(1);
+
+
+}
+
+
+// Implements the UCreateShaders function
+bool UCreateShaderProgram(const char* vtxShaderSource, const char* fragShaderSource, GLuint& programId)
+{
+    // Compilation and linkage error reporting
+    int success = 0;
+    char infoLog[512];
+
+    // Create a Shader program object.
+    programId = glCreateProgram();
+
+    // Create the vertex and fragment shader objects
+    GLuint vertexShaderId = glCreateShader(GL_VERTEX_SHADER);
+    GLuint fragmentShaderId = glCreateShader(GL_FRAGMENT_SHADER);
+
+    // Retrive the shader source
+    glShaderSource(vertexShaderId, 1, &vtxShaderSource, NULL);
+    glShaderSource(fragmentShaderId, 1, &fragShaderSource, NULL);
+
+    // Compile the vertex shader, and print compilation errors (if any)
+    glCompileShader(vertexShaderId); // compile the vertex shader
+    // check for shader compile errors
+    glGetShaderiv(vertexShaderId, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(vertexShaderId, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+
+        return false;
+    }
+
+    glCompileShader(fragmentShaderId); // compile the fragment shader
+    // check for shader compile errors
+    glGetShaderiv(fragmentShaderId, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(fragmentShaderId, sizeof(infoLog), NULL, infoLog);
+        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
+
+        return false;
+    }
+
+    // Attached compiled shaders to the shader program
+    glAttachShader(programId, vertexShaderId);
+    glAttachShader(programId, fragmentShaderId);
+
+    glLinkProgram(programId);   // links the shader program
+    // check for linking errors
+    glGetProgramiv(programId, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        glGetProgramInfoLog(programId, sizeof(infoLog), NULL, infoLog);
+        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
+
+        return false;
+    }
+
+    glUseProgram(programId);    // Uses the shader program
+    glDeleteShader(vertexShaderId);
+    glDeleteShader(fragmentShaderId);
+    return true;
+}
+
+
+void UDestroyShaderProgram(GLuint programId)
+{
+    glDeleteProgram(programId);
+}
+
+
+void UDestroyMesh(GLMesh& mesh)
+{
+    glDeleteVertexArrays(1, &mesh.vao);
+    glDeleteBuffers(2, mesh.vbos);
+}
+
